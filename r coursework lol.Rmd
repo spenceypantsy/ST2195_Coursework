@@ -1,0 +1,37 @@
+---
+title: "st2195_coursework_spencerlin"
+author: "spence"
+date: "2023-11-25"
+output: html_document
+---
+
+# ===== this project will require dplyr and tidyverse ===== 
+```{r}
+# check, and install dplyr and tidyverse.
+if (!requireNamespace("dplyr", quietly=TRUE)) {
+  ## If so, install 'rvest' 
+  install.packages("dplyr")
+}
+
+# checks if 'tidyverse' is NOT installed
+if (!requireNamespace("tidyverse", quietly=TRUE)) {
+  ## If so, install 'rvest' 
+  install.packages("tidyverse")
+}
+
+# loads the above packages if already installed or after installation
+library(dplyr)
+library(tidyverse)
+```
+
+# ===== reading flight data from 1995-1 to 2008-1 as well as ===== 
+```{r}
+# vector of all flight data
+file_names <- c("1995.csv", "1996.csv", "1997.csv", "1998.csv", "1999.csv", "2000.csv", "2001.csv", "2002.csv", "2003.csv", "2004.csv", "2005.csv", "2006.csv", "2007.csv", "2008.csv")
+
+# reading the above vector into tibbles
+flight_list <- map(file_names, ~read_csv(.x))
+
+# turning object into df
+list2env(setNames(data_list, paste0("df_", substr(filenames, 1,4))), envir=.GlobalEnv)
+```
