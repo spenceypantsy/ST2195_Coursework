@@ -1,0 +1,74 @@
+---
+title: "st2195_coursework"
+author: "spence"
+date: "2023-12-02"
+output: html_document
+---
+
+
+# ===== this project will require tidyverse ===== 
+```{r}
+# checks if 'tidyverse' is NOT installed
+if (!requireNamespace("tidyverse", quietly=TRUE)) {
+  ## If so, install 'tidyverse' 
+  install.packages("tidyverse")
+}
+
+# checks if 'data.table is NOT installed
+if (!requireNamespace("data.table", quietly=TRUE)) {
+  ## If so, install 'data.table' 
+  install.packages("data.table")
+}
+
+# loads the above packages if already installed or after installation
+library(tidyverse)
+library(data.table)
+```
+
+
+# ===== reading flight, planes, carriers and airport data ===== 
+```{r}
+# vector of all flight data
+file_names <- c("1995.csv", "1996.csv", "1997.csv", "1998.csv", "1999.csv", "2000.csv", "2001.csv", "2002.csv", "2003.csv", "2004.csv", "2005.csv", "2006.csv", "2007.csv", "2008.csv")
+
+# reading above vector of all flight data into master df
+master_df <- rbindlist(lapply(file_names,fread))       ##note: do not view this in r lol.....
+
+# read plane, carrier, and airport data into individual df
+planes_df <- fread("plane-data.csv", header = TRUE)
+carriers_df <- fread("carriers.csv", header = TRUE)
+airport_df <- fread("airports.csv", header = TRUE)     ##note: read.csv worked the first time. try fread next time see if its any faster :)
+```
+
+
+# ===== separating data into sample set 1 and sample set 2 =====
+# sample set 1 contains data from 1995-01-01 to 2001-11-04
+# sample set 2 contains data from 2001-11-18 to 2008-04-30
+# the hypothesis is that data before and after the attacks on 9/11 would be biased
+```{r}
+# creating a new column as date in the form of YYYY-MM-DD
+master_df$date <- as.Date(with(master_df, paste(Year, Month, DayofMonth, sep = "-")), 
+                          format = "%Y-%m-%d") 
+                          ##funny: i found out here that the capitalisation matters after 20 minutes of trial & error
+
+# splitting the master_df into sample set 1 and 2
+before_911_df <- master_df[master_df$date <= "2001-11-04",]
+after_911_df <- master_df[master_df$date >= "2001-11-08",]
+```
+
+
+# ===== plotting a scatterplot of delays pre and post 9/11 attack =====
+```{r}
+# total % of flights delayed pre 9/11 attack
+  ## total flights = tf
+tf_before_911 <- nrow(before_911_df)
+  ## total flights delayed = tfd
+tfd_before_911 <- before_911_df$DepDelay <- as.numeric(before_911_df$DepDelay) %>%
+  sum(before_911_df$DepDelay > 0)
+  
+  ## proportion delayed = pd
+pd_before_911 <- tfd_before_911/tf_before_911
+pd_before_911
+
+# total % of flights delayed post 9/11 attack
+```
