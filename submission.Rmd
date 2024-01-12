@@ -6,7 +6,7 @@ output: html_document
 ---
 
 
-# ===== this project will require tidyverse ===== 
+===== this project will require tidyverse, data.table, DBI ===== 
 ```{r}
 # checks if 'tidyverse' is NOT installed
 if (!requireNamespace("tidyverse", quietly=TRUE)) {
@@ -14,61 +14,238 @@ if (!requireNamespace("tidyverse", quietly=TRUE)) {
   install.packages("tidyverse")
 }
 
-# checks if 'data.table is NOT installed
+# checks if 'data.table' is NOT installed
 if (!requireNamespace("data.table", quietly=TRUE)) {
   ## If so, install 'data.table' 
   install.packages("data.table")
 }
 
+# checks if 'DBI' is NOT installed
+if (!requireNamespace("DBI", quietly=TRUE)) {
+  ## If so, install 'data.table' 
+  install.packages("DBI")
+}
+
+# checks if 'RSQLite' is NOT installed
+if (!requireNamespace("RSQLite", quietly=TRUE)) {
+  ## If so, install 'RSQLite' 
+  install.packages("RSQLite")
+}
+
 # loads the above packages if already installed or after installation
 library(tidyverse)
 library(data.table)
+library(DBI)
+library(RSQLite)
 ```
 
 
-# ===== reading flight, planes, carriers and airport data ===== 
+ ===== connecting to SQL DB ===== 
 ```{r}
-# vector of all flight data
-file_names <- c("1995.csv", "1996.csv", "1997.csv", "1998.csv", "1999.csv", "2000.csv", "2001.csv", "2002.csv", "2003.csv", "2004.csv", "2005.csv", "2006.csv", "2007.csv", "2008.csv")
+# deleting r_coursework.db if it exists in wd
+#if (file.exists("r_coursework.db")) {
+#  file.remove("r_coursework.db")
+#}
 
-# reading above vector of all flight data into master df
-master_df <- rbindlist(lapply(file_names,fread))       ##note: do not view this in r lol.....
-
-# read plane, carrier, and airport data into individual df
-planes_df <- fread("plane-data.csv", header = TRUE)
-carriers_df <- fread("carriers.csv", header = TRUE)
-airport_df <- fread("airports.csv", header = TRUE)     ##note: read.csv worked the first time. try fread next time see if its any faster :)
+conn <- dbConnect(RSQLite::SQLite(), "r_coursework.db")
 ```
 
 
-# ===== separating data into sample set 1 and sample set 2 =====
-# sample set 1 contains data from 1995-01-01 to 2001-11-04
-# sample set 2 contains data from 2001-11-18 to 2008-04-30
-# the hypothesis is that data before and after the attacks on 9/11 would be biased
+===== reading 1997 to 2007, planedata, airport and carrier csv =====
 ```{r}
-# creating a new column as date in the form of YYYY-MM-DD
-master_df$date <- as.Date(with(master_df, paste(Year, Month, DayofMonth, sep = "-")), 
-                          format = "%Y-%m-%d") 
-                          ##funny: i found out here that the capitalisation matters after 20 minutes of trial & error
+# master table for all years
+master <- data.table()
 
-# splitting the master_df into sample set 1 and 2
-before_911_df <- master_df[master_df$date <= "2001-11-04",]
-after_911_df <- master_df[master_df$date >= "2001-11-08",]
-```
+# listing of all years
+years <- 1998:2007
 
-
-# ===== plotting a scatterplot of delays pre and post 9/11 attack =====
-```{r}
-# total % of flights delayed pre 9/11 attack
-  ## total flights = tf
-tf_before_911 <- nrow(before_911_df)
-  ## total flights delayed = tfd
-tfd_before_911 <- before_911_df$DepDelay <- as.numeric(before_911_df$DepDelay) %>%
-  sum(before_911_df$DepDelay > 0)
+# for loop in 'years" and read all years csv
+for (year in years) {
+  x <- paste0(year,".csv")
+  year_data <- fread(x, header=TRUE)
   
-  ## proportion delayed = pd
-pd_before_911 <- tfd_before_911/tf_before_911
-pd_before_911
+  ## combining all years into single master for querying later
+  master <- rbindlist(list(master, year_data))
+}
 
-# total % of flights delayed post 9/11 attack
+# reading non-year csv
+planes <- fread("plane-data.csv", header=TRUE, fill=TRUE)
+airports <- fread("airports.csv", header=TRUE)
+carriers <- fread("carriers.csv", header=TRUE)
+```
+
+
+===== descriptive statistics for all flight delay data =====
+```{r}
+# using summarise from dplyr in tidyverse
+
+# consider ad for arrival delay
+ad_stats <- master %>%
+  summarise(
+    mean_ad = mean(ArrDelay, na.rm = TRUE),
+    median_ad = median(ArrDelay, na.rm = TRUE),
+    sd_ad = sd(ArrDelay, na.rm = TRUE),
+    max_ad = max(ArrDelay, na.rm = TRUE),
+    min_ad = min(ArrDelay, na.rm = TRUE)
+  )
+
+# consider dd for departure delay
+dd_stats <- master %>%
+  summarise(
+    mean_dd = mean(DepDelay, na.rm = TRUE),
+    median_dd = median(DepDelay, na.rm = TRUE),
+    sd_dd = sd(DepDelay, na.rm = TRUE),
+    max_dd = max(DepDelay, na.rm = TRUE),
+    min_dd = min(DepDelay, na.rm = TRUE)
+  )
+
+# consider td for total delay
+td_stats <- master %>%
+  summarise(
+    mean_td = mean(ArrDelay + DepDelay, na.rm = TRUE),
+    median_td = median(ArrDelay + DepDelay, na.rm = TRUE),
+    sd_td = sd(ArrDelay + DepDelay, na.rm = TRUE),
+    max_td = max(ArrDelay + DepDelay, na.rm = TRUE),
+    min_td = min(ArrDelay + DepDelay, na.rm = TRUE)
+  )
+
+print(ad_stats)
+print(dd_stats)
+print(td_stats)
+```
+
+
+===== reading all data into SQL DB =====
+```{r}
+dbWriteTable(conn, "master", master, overwrite = TRUE)
+dbWriteTable(conn, "planes", planes, overwrite = TRUE)
+dbWriteTable(conn, "airports", airports, overwrite = TRUE)
+dbWriteTable(conn, "carriers", carriers, overwrite = TRUE)
+```
+
+
+===== part 2 a: querying best times to minimise delay each year =====
+```{r}
+# update '2400' to '0000' in the db
+ ## dbExecute(conn, "UPDATE master SET CRSDepTime = 0 WHERE CRSDepTime = 2400")
+
+# querying out year, deptime(as time period) and depdelay+arrdelay
+best_time_query <- "
+  SELECT
+    Year,
+    CASE
+      WHEN CRSDepTime BETWEEN 000 AND 559 THEN '0000-0559' 
+      WHEN CRSDepTime BETWEEN 0600 AND 1159 THEN '0600-1159'
+      WHEN CRSDepTime BETWEEN 1200 AND 1759 THEN '1200-1759'
+      WHEN CRSDepTime BETWEEN 1800 AND 2359 THEN '1800-2359'
+    END AS TimePeriod, 
+    AVG(DepDelay + ArrDelay) AS Avg_Delay
+  FROM
+    master
+  WHERE
+    CRSDepTime <> 'NA' --removes cancelled flights
+  GROUP BY
+    Year, TimePeriod
+"
+
+# executing query
+best_time <- dbGetQuery(conn, best_time_query)
+
+print(best_time)
+```
+
+
+===== part 2 a: plot best times each year =====
+```{r}
+# turning column into factor
+best_time$Year <- as.factor(best_time$Year)
+best_time$TimePeriod <- factor(best_time$TimePeriod, levels = time_order)
+
+# create a line plot
+ggplot(best_time, aes(x = TimePeriod, y = Avg_Delay, group = Year, color = Year)) +
+  geom_line() +
+  geom_point() +
+  labs(title = 'Average Delay by Time Period for each year',
+       x = 'Time Period',
+       y = 'Average Departure Delay') +
+  scale_x_discrete(limits = time_order) +
+  theme_minimal()
+```
+
+
+===== part 2 a: querying best days of week to minimise delay each year =====
+```{r}
+# querying out year, dayofweek and depdelay+arrdelay
+best_day_query <- "
+  SELECT
+    Year,
+    DayOfWeek,
+    AVG(DepDelay + ArrDelay) AS Avg_Delay
+  FROM
+    Master
+  WHERE
+    CRSDepTime <> 'NA' --removes cancelled flights
+  GROUP BY
+    DayOfWeek, Year
+  ORDER BY
+    DayOfWeek ASC
+"
+
+# executing query
+best_day <- dbGetQuery(conn, best_day_query)
+
+print(best_day)
+```
+
+
+===== part 2 a: plot best days each year =====
+```{r}
+# plotting directly from the result of the query
+best_day$Year <- as.factor(best_day$Year)
+best_day$DayOfWeek <- as.factor(best_day$DayOfWeek)
+
+# Create a line plot
+ggplot(best_day, aes(x = DayOfWeek, y = Avg_Delay, group = Year, color = Year)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Delay by Day of Week",
+       x = "Day of Week",
+       y = "Average Delay") +
+  scale_x_discrete(labels = c("1" = "Sun", "2" = "Mon", "3" = "Tue", "4" = "Wed", "5" = "Thu", "6" = "Fri", "7" = "Sat")) +
+  theme_minimal()
+```
+
+
+ part 2 b: do older planes suffer more delays on a year-to-year basis? =====
+```{r}
+plane_age_query <- "
+  SELECT
+    (Master.Year - planes.year) AS Age,
+    Master.Year,
+    Master.TailNum
+  FROM
+    Master
+  LEFT JOIN planes
+    ON Master.TailNum = planes.tailnum
+  WHERE 
+    (Master.Year - planes.year) >0 AND
+    (Master.Year - planes.year) IS NOT NULL AND
+    planes.year IS NOT NULL AND
+    planes.year NOT LIKE 'None'
+"
+
+plane_age <- dbGetQuery(conn, plane_age_query)
+
+print(plane_age)
+```
+
+# ===== part 2 c: logistic regression model for diverted flights =====
+```{r}
+
+
+```
+
+# ===== disconnecting database =====
+```{r}
+dbDisconnect(conn)
 ```
