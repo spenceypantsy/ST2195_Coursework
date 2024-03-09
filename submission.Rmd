@@ -10,37 +10,128 @@ output: html_document
 ```{r}
 # checks if 'tidyverse' is NOT installed
 if (!requireNamespace("tidyverse", quietly=TRUE)) {
-  ## If so, install 'tidyverse' 
+  # if so, install 'tidyverse' 
   install.packages("tidyverse")
 }
 
 # checks if 'data.table' is NOT installed
 if (!requireNamespace("data.table", quietly=TRUE)) {
-  ## If so, install 'data.table' 
+  # if so, install 'data.table' 
   install.packages("data.table")
 }
 
 # checks if 'DBI' is NOT installed
 if (!requireNamespace("DBI", quietly=TRUE)) {
-  ## If so, install 'data.table' 
+  # if so, install 'data.table' 
   install.packages("DBI")
 }
 
 # checks if 'RSQLite' is NOT installed
 if (!requireNamespace("RSQLite", quietly=TRUE)) {
-  ## If so, install 'RSQLite' 
+  # if so, install 'RSQLite' 
   install.packages("RSQLite")
 }
+
+# checks if 'MCMCpack' is NOT installed
+##if(!requireNamespace("MCMCpack", quiety=TRUE)) {
+  # if so, install 'MCMCpack'
+  ##install.packages("MCMCpack")
+
 
 # loads the above packages if already installed or after installation
 library(tidyverse)
 library(data.table)
 library(DBI)
 library(RSQLite)
+##library(MCMCpack)
 ```
 
 
- ===== connecting to SQL DB ===== 
+===== qn 1 a: mcmc algorithm =====
+```{r}
+# creating pdf of x
+f <- function(x){
+  return (0.5*exp(-abs(x)))
+}
+
+# metropolis-hasting algorithm
+metropolis_hasting <- function(x0, N, S){
+  samples <- numeric(N)
+  current_x <- x0 #starting with x0 as xi-1
+  
+  for (i in 2:N){
+    # simulating random x that is X*~(Xi-1, s)
+    simulated_x <- rnorm(1, mean = current_x, sd = s)
+    # computing r ratio of f(x*)/f(xi-1)
+    r_ratio <- f(simulated_x)/ f(current_x)
+    # generating random number u that is U~(0,1)
+    u <- runif(1)
+    
+    # if ratio is larger than u, keep. if not, go next
+    if (log(u) < log(r_ratio)){
+      current_x <- simulated_x
+    }
+    samples[i] <- current_x
+  }
+  return(samples)
+}
+
+# setting up variables and parameters
+x0 <- 1 ## first explanatory variable
+N <- 10000 ## sample size
+s <-  1 ## s.d.
+
+# calling algorithm samples
+samples <- metropolis_hasting(x0, N, s)
+
+# visualizing the results
+ggplot() +
+  geom_histogram(aes(x = samples), bins = 50, fill = "blue", alpha = 0.5, density = TRUE) +
+  stat_function(fun = function(x) f(x), color = "red", size = 1.2) +
+  labs(title = "Metropolis-Hastings Algorithm",
+       x = "Value",
+       y = "Density") +
+  theme_minimal()
+```
+
+===== qn 1 b: R-Hat Gelman-Rubin diagnostics =====
+```{r}
+# setting up variable and parambeter for chains
+J <- 9 ## no. of chains
+x0j <- runif(J) ## random initial value between 1 and J
+
+# creating J number of chains
+chain <- metropolis_hasting(x0j[J], N, s)
+
+# defining Mj, Vj, W, M, B, R_Hat
+Mj <- function(chain){
+  return (sum(chain)/N)
+}
+
+Vj <- function(chain){
+  return (sum((chain-Mh(chain))^2)/N)
+} 
+
+W <- function(chain){
+  return(sum(Vj(chain))/J)
+}
+
+M <- function(chain){
+  return (sum(Mj(chain))/J)
+}
+
+B <- function(chain){
+  return (sum(Mj(chain)-M)^2/J)
+}
+
+R_Hat <- function(chain){
+  return (sqroot(B(chain)+W(chain))/W(chain))
+}
+
+```
+
+
+===== connecting to SQL DB ===== 
 ```{r}
 # deleting r_coursework.db if it exists in wd
 #if (file.exists("r_coursework.db")) {
@@ -56,8 +147,8 @@ conn <- dbConnect(RSQLite::SQLite(), "r_coursework.db")
 # master table for all years
 master <- data.table()
 
-# listing of all years
-years <- 1998:2007
+# listing of all years (1998L2007)
+years <- 2003:2004
 
 # for loop in 'years" and read all years csv
 for (year in years) {
@@ -77,41 +168,41 @@ carriers <- fread("carriers.csv", header=TRUE)
 
 ===== descriptive statistics for all flight delay data =====
 ```{r}
-# using summarise from dplyr in tidyverse
+head(master)
+summary(master$ArrDelay)
+summary(master$DepDelay)
+summary(master$DepDelay+master$ArrDelay)
+str(master)
 
 # consider ad for arrival delay
-ad_stats <- master %>%
-  summarise(
-    mean_ad = mean(ArrDelay, na.rm = TRUE),
-    median_ad = median(ArrDelay, na.rm = TRUE),
-    sd_ad = sd(ArrDelay, na.rm = TRUE),
-    max_ad = max(ArrDelay, na.rm = TRUE),
-    min_ad = min(ArrDelay, na.rm = TRUE)
-  )
+#ad_stats <- master %>%
+#  summarise(
+#    mean_ad = mean(ArrDelay, na.rm = TRUE),
+#    median_ad = median(ArrDelay, na.rm = TRUE),
+#    sd_ad = sd(ArrDelay, na.rm = TRUE),
+#    max_ad = max(ArrDelay, na.rm = TRUE),
+#    min_ad = min(ArrDelay, na.rm = TRUE)
+#  )
 
 # consider dd for departure delay
-dd_stats <- master %>%
-  summarise(
-    mean_dd = mean(DepDelay, na.rm = TRUE),
-    median_dd = median(DepDelay, na.rm = TRUE),
-    sd_dd = sd(DepDelay, na.rm = TRUE),
-    max_dd = max(DepDelay, na.rm = TRUE),
-    min_dd = min(DepDelay, na.rm = TRUE)
-  )
+#dd_stats <- master %>%
+#  summarise(
+#    mean_dd = mean(DepDelay, na.rm = TRUE),
+#    median_dd = median(DepDelay, na.rm = TRUE),
+ #   sd_dd = sd(DepDelay, na.rm = TRUE),
+#    max_dd = max(DepDelay, na.rm = TRUE),
+#    min_dd = min(DepDelay, na.rm = TRUE)
+#  )
 
 # consider td for total delay
-td_stats <- master %>%
-  summarise(
-    mean_td = mean(ArrDelay + DepDelay, na.rm = TRUE),
-    median_td = median(ArrDelay + DepDelay, na.rm = TRUE),
-    sd_td = sd(ArrDelay + DepDelay, na.rm = TRUE),
-    max_td = max(ArrDelay + DepDelay, na.rm = TRUE),
-    min_td = min(ArrDelay + DepDelay, na.rm = TRUE)
-  )
-
-print(ad_stats)
-print(dd_stats)
-print(td_stats)
+#td_stats <- master %>%
+ # summarise(
+  #  mean_td = mean(ArrDelay + DepDelay, na.rm = TRUE),
+   # median_td = median(ArrDelay + DepDelay, na.rm = TRUE),
+    #sd_td = sd(ArrDelay + DepDelay, na.rm = TRUE),
+    #max_td = max(ArrDelay + DepDelay, na.rm = TRUE),
+    #min_td = min(ArrDelay + DepDelay, na.rm = TRUE)
+  #)
 ```
 
 
@@ -127,7 +218,7 @@ dbWriteTable(conn, "carriers", carriers, overwrite = TRUE)
 ===== part 2 a: querying best times to minimise delay each year =====
 ```{r}
 # update '2400' to '0000' in the db
- ## dbExecute(conn, "UPDATE master SET CRSDepTime = 0 WHERE CRSDepTime = 2400")
+ dbExecute(conn, "UPDATE master SET CRSDepTime = 0 WHERE CRSDepTime = 2400")
 
 # querying out year, deptime(as time period) and depdelay+arrdelay
 best_time_query <- "
@@ -157,6 +248,8 @@ print(best_time)
 
 ===== part 2 a: plot best times each year =====
 ```{r}
+time_order <- c('0000-0559', '0600-1159', '1200-1759', '1800-2359')
+
 # turning column into factor
 best_time$Year <- as.factor(best_time$Year)
 best_time$TimePeriod <- factor(best_time$TimePeriod, levels = time_order)
@@ -218,20 +311,22 @@ ggplot(best_day, aes(x = DayOfWeek, y = Avg_Delay, group = Year, color = Year)) 
 
  part 2 b: do older planes suffer more delays on a year-to-year basis? =====
 ```{r}
+##print(master$Year)
+##print(planes$year)
+
 plane_age_query <- "
   SELECT
-    (Master.Year - planes.year) AS Age,
-    Master.Year,
-    Master.TailNum
+    (master.Year - CAST(planes.year AS INTEGER)) AS Age,
+    planes.tailNum
   FROM
-    Master
-  LEFT JOIN planes
-    ON Master.TailNum = planes.tailnum
+    planes
+  JOIN master
+    ON planes.tailNum = master.Tailnum
   WHERE 
-    (Master.Year - planes.year) >0 AND
-    (Master.Year - planes.year) IS NOT NULL AND
+    Age >0 AND
+    Age IS NOT NULL AND
     planes.year IS NOT NULL AND
-    planes.year NOT LIKE 'None'
+    planes.year NOT LIKE '%N%'
 "
 
 plane_age <- dbGetQuery(conn, plane_age_query)
