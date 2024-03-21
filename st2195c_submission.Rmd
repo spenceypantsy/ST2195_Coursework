@@ -1,0 +1,370 @@
+---
+title: "st2195_coursework"
+author: "spence"
+date: "2023-12-02"
+output: html_document
+---
+
+
+===== this project will require tidyverse, data.table, DBI ===== 
+```{r}
+# checks if 'tidyverse' is NOT installed
+if (!requireNamespace("tidyverse", quietly=TRUE)) {
+  # if so, install 'tidyverse' 
+  install.packages("tidyverse")
+}
+
+# checks if 'data.table' is NOT installed
+if (!requireNamespace("data.table", quietly=TRUE)) {
+  # if so, install 'data.table' 
+  install.packages("data.table")
+}
+
+# checks if 'DBI' is NOT installed
+if (!requireNamespace("DBI", quietly=TRUE)) {
+  # if so, install 'data.table' 
+  install.packages("DBI")
+}
+
+# checks if 'RSQLite' is NOT installed
+if (!requireNamespace("RSQLite", quietly=TRUE)) {
+  # if so, install 'RSQLite' 
+  install.packages("RSQLite")
+}
+
+# checks if 'MCMCpack' is NOT installed
+##if(!requireNamespace("MCMCpack", quiety=TRUE)) {
+  # if so, install 'MCMCpack'
+  ##install.packages("MCMCpack")
+
+
+# loads the above packages if already installed or after installation
+library(tidyverse)
+library(data.table)
+library(DBI)
+library(RSQLite)
+##library(MCMCpack)
+```
+
+
+===== qn 1 a: mcmc algorithm =====
+```{r}
+# creating pdf of x
+f <- function(x){
+  return (0.5*exp(-abs(x)))
+}
+
+# metropolis-hasting algorithm
+metropolis_hasting <- function(x0, N, S){
+  samples <- numeric(N) ## pre-allocating memory in vector for sample size N
+  current_x <- x0 ## starting with x0 as xi-1
+  
+  for (i in 2:N){
+    # simulating random x that is X*~(Xi-1, s)
+    simulated_x <- rnorm(1, mean = current_x, sd = s)
+    
+    # computing r ratio of f(x*)/f(xi-1)
+    r_ratio <- f(simulated_x)/ f(current_x)
+    
+    # generating random number u that is U~(0,1)
+    u <- runif(1)
+    
+    # if ratio is larger than u, keep. if not, go next
+    if (log(u) < log(r_ratio)){
+      current_x <- simulated_x
+    }
+    samples[i] <- current_x
+  }
+  return(samples)
+}
+
+# setting up variables and parameters
+x0 <- 0 ## first explanatory variable
+N <- 10000 ## sample size
+s <-  1 ## s.d.
+
+# calling algorithm 
+results <- metropolis_hasting(x0, N, s)
+
+# creating a df for values calculated using given pdf conditioned on min and max of results
+density_data <- data.frame(x = seq(min(results), max(results), length.out = 10000),
+                           density = f(seq(min(results), max(results), length.out = 10000)))
+
+# visualizing the results
+ggplot() +
+  ## plotting results from algorithm
+  geom_histogram(aes(x = results, y = ..density.., fill = "Samples Generated"), bins = 50, alpha = 1) +
+  ## plotting true distribution of pdf
+  geom_line(data = density_data, aes(x = x, y = density, color = "True Density"), size = 1.2) +
+  scale_fill_manual(values = "lightblue", name = NULL) + 
+  scale_color_manual(values = "orange", name = NULL) +   
+  labs(title = "Metropolis-Hastings Algorithm",
+       x = "Value",
+       y = "Density") +
+  ## plot aesthetics
+  theme_minimal() +
+  theme(legend.position = "top", 
+        plot.title = element_text(hjust = 0.5))
+
+# mean and sd of results
+results_mean = mean(results)
+cat("Mean of Results:", results_mean, "\n")
+results_std = sd(results)
+cat("Std. Dev. of Results:", results_std)
+```
+
+===== qn 1 b: R-Hat Gelman-Rubin diagnostics =====
+```{r}
+
+# step 1.1 sample mean of chain
+Mj <- function(chain){
+  return (sum(chain)/N)
+}
+
+# step 1.2  sample variance of chain
+Vj <- function(chain){
+  return (sum((chain-Mh(chain))^2)/N)
+} 
+
+# step 1.3 within sample variance 
+W <- function(chain){
+  return(sum(Vj(chain))/J)
+}
+
+# step 2.1 overall sample mean
+M <- function(chain){
+  return (sum(Mj(chain))/J)
+}
+
+# step 2.2 between sample variance
+B <- function(chain){
+  return (sum(Mj(chain)-M)^2/J)
+}
+
+# step 3 apply within sample variance and between sample variance to calculate R hat
+R_Hat <- function(chain){
+  return (sqroot(B(chain)+W(chain))/W(chain))
+}
+
+# function that loops each chain to find R Hat value across iterations of s between 0.001 to 1
+rhat_list_for_s_values <- function(N, s_range, J){
+  rhat_values = []
+}
+```
+
+
+===== connecting to SQL DB ===== 
+```{r}
+# deleting r_coursework.db if it exists in wd
+#if (file.exists("r_coursework.db")) {
+#  file.remove("r_coursework.db")
+#}
+
+conn <- dbConnect(RSQLite::SQLite(), "r_coursework.db")
+```
+
+
+===== reading 1997 to 2007, planedata, airport and carrier csv =====
+```{r}
+# master table for all years
+master <- data.table()
+
+# listing of all years (1998:2007)
+years <- 2003:2004
+
+# for loop in 'years" and read all years csv
+for (year in years) {
+  x <- paste0(year,".csv")
+  year_data <- fread(x, header=TRUE)
+  
+  ## combining all years into single master for querying later
+  master <- rbindlist(list(master, year_data))
+}
+
+# reading non-year csv
+planes <- fread("plane-data.csv", header=TRUE, fill=TRUE)
+airports <- fread("airports.csv", header=TRUE)
+carriers <- fread("carriers.csv", header=TRUE)
+
+# descriptive statistics and checking data
+head(master)
+summary(master$ArrDelay)
+summary(master$DepDelay)
+summary(master$DepDelay+master$ArrDelay)
+str(master)
+```
+
+
+===== reading all data into SQL DB =====
+```{r}
+dbWriteTable(conn, "master", master, overwrite = TRUE)
+dbWriteTable(conn, "planes", planes, overwrite = TRUE)
+dbWriteTable(conn, "airports", airports, overwrite = TRUE)
+dbWriteTable(conn, "carriers", carriers, overwrite = TRUE)
+```
+
+
+===== part 2 a: querying best times to minimise delay each year =====
+```{r}
+# update '2400' to '0000' in the db
+dbExecute(conn, "
+  UPDATE master 
+  SET CRSDepTime = 0 
+  WHERE CRSDepTime = 2400")
+
+# querying out year, deptime(as time period) and depdelay+arrdelay
+best_time_query <- "
+  SELECT
+    Year,
+    CASE
+      WHEN CRSDepTime BETWEEN 000 AND 559 THEN '0000-0559' 
+      WHEN CRSDepTime BETWEEN 0600 AND 1159 THEN '0600-1159'
+      WHEN CRSDepTime BETWEEN 1200 AND 1759 THEN '1200-1759'
+      WHEN CRSDepTime BETWEEN 1800 AND 2359 THEN '1800-2359'
+    END AS TimePeriod, 
+    AVG(DepDelay + ArrDelay) AS Avg_Delay
+  FROM
+    master
+  WHERE
+    CRSDepTime <> 'NA' --removes cancelled flights
+  GROUP BY
+    Year, TimePeriod
+"
+
+# executing query
+best_time <- dbGetQuery(conn, best_time_query)
+
+print(best_time)
+```
+
+
+===== part 2 a: plot best times each year =====
+```{r}
+time_order <- c('0000-0559', '0600-1159', '1200-1759', '1800-2359')
+
+# turning column into factor
+best_time$Year <- as.factor(best_time$Year)
+best_time$TimePeriod <- factor(best_time$TimePeriod, levels = time_order)
+
+# create a line plot
+ggplot(best_time, aes(x = TimePeriod, y = Avg_Delay, group = Year, color = Year)) +
+  geom_line() +
+  geom_point() +
+  
+  # aesthetics and labels
+  labs(title = 'Average Delay by Time Period for each year',
+       x = 'Time Period',
+       y = 'Average Departure Delay') +
+  scale_x_discrete(limits = time_order) +
+  theme_minimal()
+```
+
+
+===== part 2 a: querying best days of week to minimise delay each year =====
+```{r}
+# querying out year, dayofweek and depdelay+arrdelay
+best_day_query <- "
+  SELECT
+    Year,
+    DayOfWeek,
+    AVG(DepDelay + ArrDelay) AS Avg_Delay
+  FROM
+    Master
+  WHERE
+    CRSDepTime <> 'NA' --removes cancelled flights
+  GROUP BY
+    DayOfWeek, Year
+  ORDER BY
+    DayOfWeek ASC
+"
+
+# executing query
+best_day <- dbGetQuery(conn, best_day_query)
+
+print(best_day)
+```
+
+
+===== part 2 a: plot best days each year =====
+```{r}
+# plotting directly from the result of the query
+best_day$Year <- as.factor(best_day$Year)
+best_day$DayOfWeek <- as.factor(best_day$DayOfWeek)
+
+# Create a line plot
+ggplot(best_day, aes(x = DayOfWeek, y = Avg_Delay, group = Year, color = Year)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Average Delay by Day of Week",
+       x = "Day of Week",
+       y = "Average Delay") +
+  scale_x_discrete(labels = c("1" = "Sun", "2" = "Mon", "3" = "Tue", "4" = "Wed", "5" = "Thu", "6" = "Fri", "7" = "Sat")) + ## change x ticks to name of day from no.
+  theme_minimal()
+```
+
+
+===== part 2 b: do older planes suffer more delays on a year-to-year basis? =====
+```{r}
+#print(master$Year)
+#print(planes$year) ## found that years are string
+
+# change all irrelevant string data to NULL. note '0000' is a string, not '0'
+dbExecute(conn, "
+  UPDATE 
+    planes 
+  SET 
+    year = NULL 
+  WHERE 
+    year = '0000' OR 
+    year IS NULL OR 
+    year LIKE 'None%' 
+    OR year = ''") ## i might have to remove the WHERE IS NULL clause
+
+plane_age_query <- "
+  SELECT
+    master.Year,
+    master.TailNum,
+    (master.Year - CAST(planes.year AS INTEGER)) AS Age,
+    AVG(DepDelay + ArrDelay) AS Avg_Delay
+  FROM
+    master
+  INNER JOIN
+    planes
+    ON master.TailNum = planes.tailnum
+  WHERE 
+    planes.year IS NOT NULL AND
+    (master.Year - CAST(planes.year AS INTEGER)) > 0
+  GROUP BY
+    master.Year, 
+    master.TailNum
+"
+
+plane_age <- dbGetQuery(conn, plane_age_query)
+
+#print(plane_age)
+#tail(plane_age) ## checks to see if we queried up to the final year
+#str(plane_age) ## checks structure and data types
+#max_age_entry <- plane_age %>% 
+  #slice_max(Age) %>%
+  #print() ## checks for any outlier ages
+```
+
+
+===== part 2 b: plotting scatter of age against Avg_Delay =====
+```{r}
+ggplot(plane_age, aes(x = Age, y = Avg_Delay, color = Avg_Delay)) +
+  geom_point(alpha = 0.5) +
+  scale_color_gradient(low = "green", high = "red") +
+  labs(x = "Age of Aircraft", y = "Average Delay", title = "Average Delay vs. Age of Aircraft") +
+  theme_minimal()
+```
+
+===== part 2 c: logistic regression model for diverted flights =====
+```{r}
+
+```
+
+# ===== disconnecting database =====
+```{r}
+dbDisconnect(conn)
+```
